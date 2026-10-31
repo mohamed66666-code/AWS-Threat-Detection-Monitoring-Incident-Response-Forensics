@@ -1,7 +1,24 @@
-
-.terraform/
+# Terraform state
 *.tfstate
 *.tfstate.*
+
+# Terraform providers
+.terraform/
+
+# Variables and secrets
 *.tfvars
+*.tfvars.json
+.env
+.env.*
+
+# Terraform plans
 *.tfplan
+tfplan
+
+# Crash logs
 crash.log
+crash.*.log
+
+# IDE
+.vscode/
+.idea/
