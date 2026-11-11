@@ -1,4 +1,10 @@
 # =========================================================
+# AWS THREAT DETECTION, MONITORING, INCIDENT RESPONSE
+# PERSON 1 - CLOUD SECURITY ARCHITECT & LOGGING LEAD
+# =========================================================
+
+
+# =========================================================
 # 1. CENTRAL S3 LOG ARCHIVE
 # =========================================================
 
@@ -42,9 +48,10 @@ resource "aws_kms_key" "log_encryption" {
   deletion_window_in_days = 30
 
   tags = {
-    Name    = "aws-ir-log-encryption"
-    Project = var.project_name
-    Owner   = "Person-1"
+    Name        = "aws-ir-log-encryption"
+    Project     = var.project_name
+    Environment = var.environment
+    Owner       = "Person-1"
   }
 }
 
@@ -76,7 +83,7 @@ data "aws_caller_identity" "current" {}
 
 # =========================================================
 # 4. S3 BUCKET POLICY
-# CLOUDTRAIL + AWS CONFIG
+# ALLOWS CLOUDTRAIL AND AWS CONFIG TO DELIVER LOGS
 # =========================================================
 
 resource "aws_s3_bucket_policy" "log_archive" {
@@ -86,8 +93,6 @@ resource "aws_s3_bucket_policy" "log_archive" {
     Version = "2012-10-17"
 
     Statement = [
-
-      # CloudTrail bucket permission check
       {
         Sid    = "AWSCloudTrailAclCheck"
         Effect = "Allow"
@@ -105,8 +110,6 @@ resource "aws_s3_bucket_policy" "log_archive" {
           }
         }
       },
-
-      # CloudTrail write permission
       {
         Sid    = "AWSCloudTrailWrite"
         Effect = "Allow"
@@ -125,8 +128,6 @@ resource "aws_s3_bucket_policy" "log_archive" {
           }
         }
       },
-
-      # AWS Config bucket permission check
       {
         Sid    = "AWSConfigBucketPermissionsCheck"
         Effect = "Allow"
@@ -144,8 +145,6 @@ resource "aws_s3_bucket_policy" "log_archive" {
           }
         }
       },
-
-      # AWS Config write permission
       {
         Sid    = "AWSConfigWrite"
         Effect = "Allow"
@@ -166,12 +165,16 @@ resource "aws_s3_bucket_policy" "log_archive" {
       }
     ]
   })
+
+  depends_on = [
+    aws_s3_bucket_public_access_block.log_archive
+  ]
 }
 
 
 # =========================================================
 # 5. KMS KEY POLICY
-# CLOUDTRAIL + AWS CONFIG
+# ALLOWS ACCOUNT ADMINISTRATION, CLOUDTRAIL AND AWS CONFIG
 # =========================================================
 
 resource "aws_kms_key_policy" "log_encryption" {
@@ -181,8 +184,6 @@ resource "aws_kms_key_policy" "log_encryption" {
     Version = "2012-10-17"
 
     Statement = [
-
-      # Account administrator permissions
       {
         Sid    = "EnableIAMUserPermissions"
         Effect = "Allow"
@@ -194,8 +195,6 @@ resource "aws_kms_key_policy" "log_encryption" {
         Action   = "kms:*"
         Resource = "*"
       },
-
-      # CloudTrail encryption permissions
       {
         Sid    = "AllowCloudTrailEncryption"
         Effect = "Allow"
@@ -217,8 +216,6 @@ resource "aws_kms_key_policy" "log_encryption" {
           }
         }
       },
-
-      # AWS Config encryption permissions
       {
         Sid    = "AllowAWSConfigEncryption"
         Effect = "Allow"
@@ -247,7 +244,8 @@ resource "aws_kms_key_policy" "log_encryption" {
 
 
 # =========================================================
-# 6. CLOUDTRAIL MULTI-REGION
+# 6. CLOUDTRAIL MULTI-REGION TRAIL
+# MANAGEMENT EVENTS + OPTIONAL S3 DATA EVENTS
 # =========================================================
 
 resource "aws_cloudtrail" "main" {
@@ -266,9 +264,10 @@ resource "aws_cloudtrail" "main" {
   ]
 
   tags = {
-    Name    = "${var.project_name}-${var.environment}-trail"
-    Project = var.project_name
-    Owner   = "Person-1"
+    Name        = "${var.project_name}-${var.environment}-trail"
+    Project     = var.project_name
+    Environment = var.environment
+    Owner       = "Person-1"
   }
 
   event_selector {
@@ -289,6 +288,8 @@ resource "aws_cloudtrail" "main" {
 
 # =========================================================
 # 7. S3 LOG RETENTION
+# TRANSITION TO GLACIER AFTER 90 DAYS
+# EXPIRE CURRENT OBJECTS AFTER 365 DAYS
 # =========================================================
 
 resource "aws_s3_bucket_lifecycle_configuration" "log_archive" {
@@ -344,21 +345,49 @@ resource "aws_iam_role" "config_role" {
   })
 
   tags = {
-    Name    = "${var.project_name}-config-role"
-    Project = var.project_name
-    Owner   = "Person-1"
+    Name        = "${var.project_name}-${var.environment}-config-role"
+    Project     = var.project_name
+    Environment = var.environment
+    Owner       = "Person-1"
   }
 }
 
 resource "aws_iam_role_policy_attachment" "config_role" {
-  role = aws_iam_role.config_role.name
-
+  role       = aws_iam_role.config_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWS_ConfigRole"
 }
 
 
 # =========================================================
-# 9. AWS CONFIG CONFIGURATION RECORDER
+# 9. AWS CONFIG S3 ACCESS POLICY
+# =========================================================
+
+resource "aws_iam_role_policy" "config_s3_access" {
+  name = "${var.project_name}-${var.environment}-config-s3-access"
+  role = aws_iam_role.config_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+
+    Statement = [
+      {
+        Sid    = "CheckLogArchiveBucket"
+        Effect = "Allow"
+
+        Action = [
+          "s3:GetBucketAcl",
+          "s3:ListBucket"
+        ]
+
+        Resource = aws_s3_bucket.log_archive.arn
+      }
+    ]
+  })
+}
+
+
+# =========================================================
+# 10. AWS CONFIG CONFIGURATION RECORDER
 # =========================================================
 
 resource "aws_config_configuration_recorder" "main" {
@@ -371,20 +400,23 @@ resource "aws_config_configuration_recorder" "main" {
   }
 
   depends_on = [
-    aws_iam_role_policy_attachment.config_role
+    aws_iam_role_policy_attachment.config_role,
+    aws_iam_role_policy.config_s3_access
   ]
 }
 
 
 # =========================================================
-# 10. AWS CONFIG DELIVERY CHANNEL
+# 11. AWS CONFIG DELIVERY CHANNEL
 # =========================================================
 
 resource "aws_config_delivery_channel" "main" {
   name           = "${var.project_name}-${var.environment}-delivery"
   s3_bucket_name = aws_s3_bucket.log_archive.bucket
+  s3_kms_key_arn = aws_kms_key.log_encryption.arn
 
   depends_on = [
+    aws_config_configuration_recorder.main,
     aws_s3_bucket_policy.log_archive,
     aws_kms_key_policy.log_encryption
   ]
@@ -392,7 +424,7 @@ resource "aws_config_delivery_channel" "main" {
 
 
 # =========================================================
-# 11. START AWS CONFIG RECORDING
+# 12. START AWS CONFIG RECORDING
 # =========================================================
 
 resource "aws_config_configuration_recorder_status" "main" {
@@ -400,6 +432,7 @@ resource "aws_config_configuration_recorder_status" "main" {
   is_enabled = true
 
   depends_on = [
-    aws_config_delivery_channel.main
+    aws_config_delivery_channel.main,
+    aws_iam_role_policy.config_s3_access
   ]
 }
