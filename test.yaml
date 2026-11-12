@@ -1,0 +1,52 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Secure S3 Bucket with Public Access Block and Encryption
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Enter your S3 bucket name
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+    ConstraintDescription: Use lowercase letters, numbers, dots, and hyphens.
+
+Resources:
+
+  SecureS3Bucket:
+    Type: AWS::S3::Bucket
+
+    Properties:
+      BucketName: !Ref BucketName
+
+      # Block all public access
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      # Enable server-side encryption
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      # Enable versioning
+      VersioningConfiguration:
+        Status: Enabled
+
+      # Disable ACLs
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+Outputs:
+  BucketName:
+    Description: Created S3 Bucket Name
+    Value: !Ref SecureS3Bucket
+
+  BucketARN:
+    Description: S3 Bucket ARN
+    Value: !GetAtt SecureS3Bucket.Arn
